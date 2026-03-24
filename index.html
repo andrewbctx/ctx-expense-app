@@ -388,7 +388,7 @@
             merchant: '',
             amount: '',
             description: '',
-            attachment: null,
+            attachments: [], // Changed from single attachment to array
             noAttachment: false
         };
 
@@ -667,10 +667,11 @@
                         </div>
                         <div class="form-group">
                             <div class="upload-area" id="upload-area" onclick="document.getElementById('file-input').click()">
-                                <input type="file" id="file-input" accept="image/*,.pdf" style="display: none" onchange="handleFile(this)">
+                                <input type="file" id="file-input" accept="image/*,.pdf" multiple style="display: none" onchange="handleFiles(this)">
                                 <div class="upload-icon">📎</div>
                                 <div id="file-status">${attachmentStatus}</div>
                             </div>
+                            <div id="files-list" style="margin-top: 12px;"></div>
                             
                             <div class="checkbox-wrapper hidden" id="no-attachment-wrapper">
                                 <input type="checkbox" id="no-attachment-check" onchange="toggleSubmit()">
@@ -770,24 +771,63 @@
             }
         }
 
-        function handleFile(input) {
-            if (input.files && input.files[0]) {
-                state.attachment = input.files[0];
-                const uploadArea = document.getElementById('upload-area');
-                const fileStatus = document.getElementById('file-status');
-                uploadArea.classList.add('has-file');
-                fileStatus.textContent = '✓ ' + input.files[0].name;
+        function handleFiles(input) {
+            if (input.files && input.files.length > 0) {
+                // Add new files to existing attachments
+                for (let i = 0; i < input.files.length; i++) {
+                    state.attachments.push(input.files[i]);
+                }
+                
+                updateFilesList();
                 document.getElementById('no-attachment-wrapper').classList.add('hidden');
                 document.getElementById('submit-btn').disabled = false;
                 state.noAttachment = false;
+                
+                // Reset the input so the same file can be selected again or user can add more
+                input.value = '';
             }
+        }
+        
+        function updateFilesList() {
+            const filesList = document.getElementById('files-list');
+            const uploadArea = document.getElementById('upload-area');
+            const fileStatus = document.getElementById('file-status');
+            
+            if (state.attachments.length > 0) {
+                uploadArea.classList.add('has-file');
+                fileStatus.innerHTML = `✓ ${state.attachments.length} file${state.attachments.length > 1 ? 's' : ''} selected<br><span style="font-size: 12px; color: #666;">Tap to add more</span>`;
+                
+                // Show list of files with remove buttons
+                filesList.innerHTML = state.attachments.map((file, index) => `
+                    <div style="display: flex; align-items: center; justify-content: space-between; padding: 8px; background: #f9f9f9; border-radius: 4px; margin-bottom: 6px;">
+                        <span style="font-size: 13px; color: #333;">📄 ${file.name}</span>
+                        <button type="button" onclick="removeFile(${index})" style="background: #ef4444; color: white; border: none; padding: 4px 12px; border-radius: 4px; font-size: 12px; cursor: pointer;">Remove</button>
+                    </div>
+                `).join('');
+            } else {
+                uploadArea.classList.remove('has-file');
+                fileStatus.textContent = state.transactionType === 'Return' 
+                    ? 'Tap here to attach credit memo or return receipt'
+                    : 'Tap here to attach your receipt';
+                filesList.innerHTML = '';
+            }
+        }
+        
+        function removeFile(index) {
+            state.attachments.splice(index, 1);
+            updateFilesList();
+            
+            // Update submit button state
+            const checkbox = document.getElementById('no-attachment-check');
+            const submitBtn = document.getElementById('submit-btn');
+            submitBtn.disabled = state.attachments.length === 0 && !checkbox.checked;
         }
 
         function toggleSubmit() {
             const checkbox = document.getElementById('no-attachment-check');
             const submitBtn = document.getElementById('submit-btn');
             state.noAttachment = checkbox.checked;
-            submitBtn.disabled = !checkbox.checked && !state.attachment;
+            submitBtn.disabled = !checkbox.checked && state.attachments.length === 0;
         }
 
         function nextStep() {
@@ -840,24 +880,30 @@
                 merchant: state.merchant,
                 amount: state.amount,
                 description: state.description,
-                hasAttachment: !!state.attachment,
-                attachmentName: state.attachment ? state.attachment.name : null,
-                attachmentType: state.attachment ? state.attachment.type : null,
-                attachmentData: null
+                hasAttachment: state.attachments.length > 0,
+                attachmentCount: state.attachments.length,
+                attachments: []
             };
             
-            // Convert attachment to base64 if present
-            if (state.attachment) {
+            // Convert all attachments to base64
+            if (state.attachments.length > 0) {
                 try {
-                    const reader = new FileReader();
-                    const base64Data = await new Promise((resolve, reject) => {
-                        reader.onload = () => resolve(reader.result.split(',')[1]);
-                        reader.onerror = reject;
-                        reader.readAsDataURL(state.attachment);
-                    });
-                    formData.attachmentData = base64Data;
+                    for (let i = 0; i < state.attachments.length; i++) {
+                        const file = state.attachments[i];
+                        const reader = new FileReader();
+                        const base64Data = await new Promise((resolve, reject) => {
+                            reader.onload = () => resolve(reader.result.split(',')[1]);
+                            reader.onerror = reject;
+                            reader.readAsDataURL(file);
+                        });
+                        formData.attachments.push({
+                            name: file.name,
+                            type: file.type,
+                            data: base64Data
+                        });
+                    }
                 } catch (error) {
-                    console.error('Error reading attachment:', error);
+                    console.error('Error reading attachments:', error);
                 }
             }
             
@@ -896,8 +942,10 @@
             Object.keys(state).forEach(k => {
                 if (k === 'currentStep') {
                     state[k] = 1;
-                } else if (k === 'attachment' || k === 'noAttachment') {
-                    state[k] = k === 'attachment' ? null : false;
+                } else if (k === 'attachments') {
+                    state[k] = [];
+                } else if (k === 'noAttachment') {
+                    state[k] = false;
                 } else {
                     state[k] = '';
                 }
