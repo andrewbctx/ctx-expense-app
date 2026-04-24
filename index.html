@@ -789,6 +789,11 @@
             if (state.cardType === 'Gloria Inn Capital 1 Mastercard') {
                 return ['OOGG - Gloria Inn', 'OOGG - Gloria Manor', 'OOGG - Gloria Cottage', 'OOGG - Gloria Estate', 'OOGG - Gloria Inn & Cottages_All Properties'];
             }
+            // CTX Cards (Andrew's, Scott's, John's) should have access to ALL properties
+            if (state.cardType && state.cardType.includes('CTX Card')) {
+                return allProperties;
+            }
+            // For Vendor Invoices/ACH Payments, use company-specific properties
             if (state.company && companyPropertyMap[state.company]) {
                 return companyPropertyMap[state.company];
             }
