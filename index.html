@@ -388,11 +388,14 @@
             merchant: '',
             amount: '',
             description: '',
+            invoiceNumber: '', // For vendor invoices
             attachments: [], // Changed from single attachment to array
             noAttachment: false
         };
 
         const companyPropertyMap = {
+            'CTX Development Group LLC': ['CTX Development - Office / Tools'],
+            'CTX Hospitality LLC': ['CTX Hospitality - Operations'],
             'BOOO Properties LLC': ['BOOO - Redeemed House Main Bldg', 'BOOO - Redeemed House Quonset Hut/Hangar'],
             'MWR Properties': ['MWR - Deming, NM'],
             'Northpaw Partners LLC': ['Northpaw - Forsgard House', 'Northpaw - 4th & 5th St Lots'],
@@ -495,7 +498,7 @@
                     if (state.transactionType === 'Purchase') {
                         container.innerHTML = `
                             <div class="question">What type of expense are you submitting?</div>
-                            ${createButtons(['Company Credit Card', 'Personal Expense Reimbursement', 'Vendor Invoice'], 'entryType')}
+                            ${createButtons(['Company Credit Card', 'Personal Expense Reimbursement', 'Vendor Invoice', 'ACH Bank Payment'], 'entryType')}
                             <button class="btn-primary" onclick="nextStep()" id="step3-continue" disabled>Continue</button>
                         `;
                         setTimeout(() => {
@@ -550,11 +553,15 @@
                             <button class="btn-primary" onclick="nextStep()">Got it, Continue</button>
                         `;
                     } else {
-                        // Vendor Invoice or Vendor Account Credit
+                        // Vendor Invoice, ACH Bank Payment, or Vendor Account Credit
                         const questionText = state.entryType === 'Vendor Account Credit'
                             ? 'Which company should receive this vendor credit?'
+                            : state.entryType === 'ACH Bank Payment'
+                            ? 'Which company made this ACH payment?'
                             : 'Do you know which company should pay for this invoice?';
                         const infoText = state.entryType === 'Vendor Account Credit'
+                            ? 'If you know the company, select it below. If you\'re not sure, click "I don\'t know" and we\'ll help you find it by property.'
+                            : state.entryType === 'ACH Bank Payment'
                             ? 'If you know the company, select it below. If you\'re not sure, click "I don\'t know" and we\'ll help you find it by property.'
                             : 'If you know the company, select it below. If you\'re not sure, click "I don\'t know" and we\'ll help you find it by property.';
                         container.innerHTML = `
@@ -606,21 +613,44 @@
                     break;
                     
                 case 6:
-                case 6:
                     const isReturn = state.transactionType === 'Return';
-                    const detailsQuestion = isReturn ? 'Tell us about this return' : 'Tell us about this expense';
-                    const merchantLabel = isReturn ? 'Where was this return processed?' : 'Where did you make this purchase?';
-                    const amountLabel = isReturn ? 'What was the return amount?' : 'How much was it?';
-                    const descriptionLabel = isReturn ? 'What was returned and why?' : 'What was this purchase for?';
-                    const descriptionPlaceholder = isReturn 
-                        ? 'e.g., Returned damaged lumber, Wrong part ordered, Duplicate purchase'
-                        : 'e.g., Lumber for deck repair, Office supplies, Monthly internet service';
+                    const isVendorInvoice = state.entryType === 'Vendor Invoice' || state.entryType === 'ACH Bank Payment';
+                    
+                    let detailsQuestion, merchantLabel, amountLabel, descriptionLabel, descriptionPlaceholder;
+                    
+                    if (isVendorInvoice) {
+                        detailsQuestion = state.entryType === 'ACH Bank Payment' 
+                            ? 'Tell us about this ACH bank payment'
+                            : 'Tell us about this vendor invoice';
+                        merchantLabel = 'Vendor Name - Who provided this service or materials?';
+                        amountLabel = 'Bill Amount';
+                        descriptionLabel = 'What is this bill for?';
+                        descriptionPlaceholder = 'e.g., Plumbing repairs, Monthly lawn service, Materials for renovation';
+                    } else if (isReturn) {
+                        detailsQuestion = 'Tell us about this return';
+                        merchantLabel = 'Where was this return processed?';
+                        amountLabel = 'What was the return amount?';
+                        descriptionLabel = 'What was returned and why?';
+                        descriptionPlaceholder = 'e.g., Returned damaged lumber, Wrong part ordered, Duplicate purchase';
+                    } else {
+                        detailsQuestion = 'Tell us about this expense';
+                        merchantLabel = 'Where did you make this purchase?';
+                        amountLabel = 'How much was it?';
+                        descriptionLabel = 'What was this purchase for?';
+                        descriptionPlaceholder = 'e.g., Lumber for deck repair, Office supplies, Monthly internet service';
+                    }
                     
                     container.innerHTML = `
                         <div class="question">${detailsQuestion}</div>
+                        ${isVendorInvoice ? `
+                            <div class="form-group">
+                                <label class="form-label">Vendor Invoice Number <span style="color: #ef4444;">*</span></label>
+                                <input type="text" class="form-input" id="invoice-number-input" placeholder="e.g., INV-12345, 2024-001">
+                            </div>
+                        ` : ''}
                         <div class="form-group">
                             <label class="form-label">${merchantLabel}</label>
-                            <input type="text" class="form-input" id="merchant-input" placeholder="e.g., Home Depot, Walmart, Joe's Plumbing">
+                            <input type="text" class="form-input" id="merchant-input" placeholder="e.g., ${isVendorInvoice ? 'ABC Plumbing, XYZ Contractors' : 'Home Depot, Walmart, Joe\'s Plumbing'}">
                         </div>
                         <div class="form-group">
                             <label class="form-label">${amountLabel}</label>
@@ -636,7 +666,11 @@
                         <button class="btn-primary" onclick="nextStep()" id="details-continue" disabled>Continue</button>
                     `;
                     setTimeout(() => {
-                        ['merchant-input', 'amount-input', 'description-input'].forEach(id => {
+                        const inputIds = ['merchant-input', 'amount-input', 'description-input'];
+                        if (isVendorInvoice) {
+                            inputIds.unshift('invoice-number-input');
+                        }
+                        inputIds.forEach(id => {
                             document.getElementById(id).addEventListener('input', checkDetailsComplete);
                         });
                     }, 0);
@@ -762,12 +796,25 @@
         }
 
         function checkDetailsComplete() {
+            const isVendorInvoice = state.entryType === 'Vendor Invoice' || state.entryType === 'ACH Bank Payment';
+            
+            // Get invoice number if field exists
+            const invoiceInput = document.getElementById('invoice-number-input');
+            if (invoiceInput) {
+                state.invoiceNumber = invoiceInput.value;
+            }
+            
             state.merchant = document.getElementById('merchant-input').value;
             state.amount = document.getElementById('amount-input').value;
             state.description = document.getElementById('description-input').value;
             const btn = document.getElementById('details-continue');
             if (btn) {
-                btn.disabled = !state.merchant || !state.amount || !state.description;
+                // For vendor invoices and ACH payments, require invoice number
+                if (isVendorInvoice) {
+                    btn.disabled = !state.invoiceNumber || !state.merchant || !state.amount || !state.description;
+                } else {
+                    btn.disabled = !state.merchant || !state.amount || !state.description;
+                }
             }
         }
 
@@ -840,11 +887,15 @@
                 state.company = '';
             }
             if (state.currentStep === 6) {
+                const invoiceInput = document.getElementById('invoice-number-input');
+                if (invoiceInput) {
+                    state.invoiceNumber = invoiceInput.value;
+                }
                 state.merchant = document.getElementById('merchant-input').value;
                 state.amount = document.getElementById('amount-input').value;
                 state.description = document.getElementById('description-input').value;
             }
-            if (state.currentStep === 4 && (state.entryType === 'Vendor Invoice' || state.entryType === 'Vendor Account Credit')) {
+            if (state.currentStep === 4 && (state.entryType === 'Vendor Invoice' || state.entryType === 'ACH Bank Payment' || state.entryType === 'Vendor Account Credit')) {
                 const select = document.getElementById('company-select');
                 if (select) state.company = select.value;
             }
@@ -880,6 +931,7 @@
                 merchant: state.merchant,
                 amount: state.amount,
                 description: state.description,
+                invoiceNumber: state.invoiceNumber || '', // Include invoice number
                 hasAttachment: state.attachments.length > 0,
                 attachmentCount: state.attachments.length,
                 attachments: []
